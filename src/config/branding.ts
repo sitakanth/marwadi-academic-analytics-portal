@@ -5,11 +5,11 @@ export const BRANDING = {
   shortTagline: "Advanced Academic Intelligence Platform",
   logo: "/logo.png",
   website: "https://www.marwadiuniversity.ac.in",
-  department: "Faculty of Computer Application",
+  department: "Computer Science and Engineering in AI/ML/DS",
   address: "Rajkot, Gujarat, India",
   established: "2013",
   footer: {
-    copyright: `© ${new Date().getFullYear()} Marwadi University. All rights reserved.`,
+    copyright: `© 2026 Marwadi University Academic Performance Analytics Portal`,
     disclaimer: "This is a system-generated academic analytics report.",
     poweredBy: "Academic Performance Analytics Portal",
   },

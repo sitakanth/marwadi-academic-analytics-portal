@@ -23,6 +23,6 @@ export const APP_CONFIG = {
     pageHeight: 297,
     margin: 20,
   },
-  totalProgramCredits: 108,
+  totalProgramCredits: 165,
   maxSemesters: 8,
 } as const;

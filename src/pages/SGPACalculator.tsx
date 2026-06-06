@@ -7,9 +7,14 @@ import {
   BookOpen,
   Calculator,
   Award,
+  Shuffle,
 } from 'lucide-react';
 import { useAcademic } from '../context/AcademicContext';
-import { SEMESTERS, getCreditSubjects, getNonCreditSubjects } from '../data/semesters';
+import {
+  SEMESTERS,
+  getActiveSubjects,
+  getActiveCreditSubjects,
+} from '../data/semesters';
 import { GRADE_MAP, GRADE_OPTIONS, NON_CREDIT_GRADE } from '../config/gradeSystem';
 import { calculateSGPA } from '../utils/calculations';
 import { useAnimatedCounter } from '../hooks/useLocalStorage';
@@ -26,31 +31,55 @@ const row = {
 };
 
 export default function SGPACalculator() {
-  const { dispatch, getResultForSemester } = useAcademic();
+  const { dispatch, getResultForSemester, getSelectedElectives } = useAcademic();
   const [selectedSem, setSelectedSem] = useState(1);
   const [saved, setSaved] = useState(false);
 
   const semester = SEMESTERS.find((s) => s.id === selectedSem)!;
-  const creditSubjects = getCreditSubjects(semester);
-  const nonCreditSubjects = getNonCreditSubjects(semester);
+  const electivesForSem = getSelectedElectives(selectedSem);
+
+  /* derive subject lists based on selected electives */
+  const activeSubjects = useMemo(
+    () => getActiveSubjects(semester, electivesForSem),
+    [semester, electivesForSem],
+  );
+  const creditSubjects = useMemo(
+    () => getActiveCreditSubjects(semester, electivesForSem),
+    [semester, electivesForSem],
+  );
+  const nonCreditSubjects = useMemo(
+    () => activeSubjects.filter((s) => s.isNonCredit),
+    [activeSubjects],
+  );
 
   /* initialise grades from context or blank */
   const existing = getResultForSemester(selectedSem);
-  const initialGrades = useCallback(
-    () =>
-      semester.subjects.map((sub) => {
-        const saved = existing?.grades.find((g) => g.subjectName === sub.name);
+  const buildGrades = useCallback(
+    (
+      sem: typeof semester,
+      ex: SemesterResult | undefined,
+      electives: Record<string, string>,
+    ): GradeEntry[] => {
+      const subs = getActiveSubjects(sem, electives);
+      return subs.map((sub) => {
+        const savedEntry = ex?.grades.find((g) => g.code === sub.code);
         return {
           subjectName: sub.name,
+          code: sub.code,
           credits: sub.credits,
           isNonCredit: sub.isNonCredit,
-          grade: saved?.grade ?? (sub.isNonCredit ? NON_CREDIT_GRADE : ''),
+          isProject: sub.isProject,
+          electiveGroupId: sub.electiveGroupId,
+          grade: savedEntry?.grade ?? (sub.isNonCredit ? NON_CREDIT_GRADE : ''),
         } as GradeEntry;
-      }),
-    [semester, existing],
+      });
+    },
+    [],
   );
 
-  const [grades, setGrades] = useState<GradeEntry[]>(initialGrades);
+  const [grades, setGrades] = useState<GradeEntry[]>(() =>
+    buildGrades(semester, existing, electivesForSem),
+  );
 
   /* re-initialise when semester changes */
   const handleSemChange = (id: number) => {
@@ -58,17 +87,46 @@ export default function SGPACalculator() {
     setSaved(false);
     const sem = SEMESTERS.find((s) => s.id === id)!;
     const ex = getResultForSemester(id) as SemesterResult | undefined;
-    setGrades(
-      sem.subjects.map((sub) => {
-        const s = ex?.grades.find((g) => g.subjectName === sub.name);
+    const elecs = getSelectedElectives(id);
+    setGrades(buildGrades(sem, ex, elecs));
+  };
+
+  /* rebuild grades when elective selection changes (subjects shift) */
+  const rebuildGradesForCurrentSem = useCallback(() => {
+    const sem = SEMESTERS.find((s) => s.id === selectedSem)!;
+    const ex = getResultForSemester(selectedSem);
+    const elecs = getSelectedElectives(selectedSem);
+    setGrades((prevGrades) => {
+      const newSubs = getActiveSubjects(sem, elecs);
+      return newSubs.map((sub) => {
+        // try to preserve any grade already set for this subject
+        const prev = prevGrades.find((g) => g.code === sub.code);
+        const savedEntry = ex?.grades.find((g) => g.code === sub.code);
         return {
           subjectName: sub.name,
+          code: sub.code,
           credits: sub.credits,
           isNonCredit: sub.isNonCredit,
-          grade: s?.grade ?? (sub.isNonCredit ? NON_CREDIT_GRADE : ''),
-        };
-      }),
-    );
+          isProject: sub.isProject,
+          electiveGroupId: sub.electiveGroupId,
+          grade:
+            prev?.grade ??
+            savedEntry?.grade ??
+            (sub.isNonCredit ? NON_CREDIT_GRADE : ''),
+        } as GradeEntry;
+      });
+    });
+  }, [selectedSem, getResultForSemester, getSelectedElectives]);
+
+  /* handle elective selection */
+  const handleElectiveSelect = (groupId: string, subjectCode: string) => {
+    dispatch({
+      type: 'SET_ELECTIVE_SELECTION',
+      payload: { semesterId: selectedSem, groupId, subjectCode },
+    });
+    setSaved(false);
+    // Rebuild grades after a micro-tick so the context has updated
+    setTimeout(() => rebuildGradesForCurrentSem(), 0);
   };
 
   /* computed */
@@ -91,15 +149,15 @@ export default function SGPACalculator() {
   );
 
   const allFilled = creditSubjects.every((sub) => {
-    const g = grades.find((gr) => gr.subjectName === sub.name);
+    const g = grades.find((gr) => gr.code === sub.code);
     return g && g.grade && g.grade !== '';
   });
 
   /* handlers */
-  const updateGrade = (subjectName: string, grade: string) => {
+  const updateGrade = (code: string, grade: string) => {
     setSaved(false);
     setGrades((prev) =>
-      prev.map((g) => (g.subjectName === subjectName ? { ...g, grade } : g)),
+      prev.map((g) => (g.code === code ? { ...g, grade } : g)),
     );
   };
 
@@ -119,12 +177,11 @@ export default function SGPACalculator() {
 
   const handleReset = () => {
     setSaved(false);
-    setGrades(
-      semester.subjects.map((sub) => ({
-        subjectName: sub.name,
-        credits: sub.credits,
-        isNonCredit: sub.isNonCredit,
-        grade: sub.isNonCredit ? NON_CREDIT_GRADE : '',
+    /* Reset grades but keep elective selections intact */
+    setGrades((prev) =>
+      prev.map((g) => ({
+        ...g,
+        grade: g.isNonCredit ? NON_CREDIT_GRADE : '',
       })),
     );
   };
@@ -177,6 +234,107 @@ export default function SGPACalculator() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '1.5rem', alignItems: 'start' }}>
         {/* left — subjects */}
         <div>
+          {/* ═══ Elective Selector ═══ */}
+          {semester.electiveGroups && semester.electiveGroups.length > 0 && (
+            <div style={{ marginBottom: '1.5rem' }}>
+              {semester.electiveGroups.map((group) => {
+                const currentSelection = electivesForSem[group.id] || '';
+                return (
+                  <div
+                    key={group.id}
+                    className="glass-card"
+                    style={{ padding: '1.1rem', marginBottom: '0.75rem' }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        marginBottom: '0.85rem',
+                      }}
+                    >
+                      <Shuffle size={15} style={{ color: 'var(--primary-400)' }} />
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          color: 'var(--text-primary)',
+                        }}
+                      >
+                        {group.title}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(auto-fill, minmax(200px, 1fr))`,
+                        gap: '0.5rem',
+                      }}
+                    >
+                      {group.options.map((opt) => {
+                        const isSelected = currentSelection === opt.code;
+                        return (
+                          <motion.button
+                            key={opt.code}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => handleElectiveSelect(group.id, opt.code)}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.35rem',
+                              padding: '0.75rem 0.85rem',
+                              borderRadius: 'var(--radius-md)',
+                              border: isSelected
+                                ? '2px solid var(--primary-500)'
+                                : '2px solid var(--border-primary)',
+                              background: isSelected
+                                ? 'var(--primary-500/0.08)'
+                                : 'var(--bg-secondary)',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              opacity: isSelected ? 1 : 0.65,
+                              transition: 'all 0.2s ease',
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontWeight: 600,
+                                fontSize: '0.8rem',
+                                color: isSelected
+                                  ? 'var(--primary-400)'
+                                  : 'var(--text-primary)',
+                              }}
+                            >
+                              {opt.name}
+                            </span>
+                            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                              <span
+                                style={{
+                                  fontSize: '0.65rem',
+                                  color: 'var(--text-muted)',
+                                  fontFamily: 'monospace',
+                                }}
+                              >
+                                {opt.code}
+                              </span>
+                              <span
+                                className="badge badge-primary"
+                                style={{ fontSize: '0.6rem' }}
+                              >
+                                {opt.credits} cr
+                              </span>
+                            </div>
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* credit subjects */}
           <div style={{ marginBottom: '1.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -191,20 +349,20 @@ export default function SGPACalculator() {
 
             <AnimatePresence mode="wait">
               <motion.div
-                key={selectedSem}
+                key={`${selectedSem}-${JSON.stringify(electivesForSem)}`}
                 variants={container}
                 initial="hidden"
                 animate="show"
                 exit={{ opacity: 0 }}
               >
                 {creditSubjects.map((sub) => {
-                  const g = grades.find((gr) => gr.subjectName === sub.name);
+                  const g = grades.find((gr) => gr.code === sub.code);
                   const gradeVal = g?.grade ?? '';
                   const points = gradeVal ? sub.credits * (GRADE_MAP[gradeVal] ?? 0) : 0;
                   const gradeInfo = GRADE_OPTIONS.find((o) => o.grade === gradeVal);
                   return (
                     <motion.div
-                      key={sub.name}
+                      key={sub.code}
                       variants={row}
                       className="glass-card"
                       style={{
@@ -216,10 +374,60 @@ export default function SGPACalculator() {
                         flexWrap: 'wrap',
                       }}
                     >
-                      {/* subject name */}
+                      {/* subject name + badges */}
                       <div style={{ flex: 1, minWidth: 180 }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            fontSize: '0.85rem',
+                            color: 'var(--text-primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                          }}
+                        >
                           {sub.name}
+                          {sub.isProject && (
+                            <span
+                              style={{
+                                fontSize: '0.6rem',
+                                fontWeight: 700,
+                                background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                                color: '#fff',
+                                padding: '0.1rem 0.4rem',
+                                borderRadius: 'var(--radius-sm)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.2rem',
+                              }}
+                            >
+                              🔬 Project
+                            </span>
+                          )}
+                          {sub.electiveGroupId && (
+                            <span
+                              style={{
+                                fontSize: '0.6rem',
+                                fontWeight: 600,
+                                background: 'var(--primary-500/0.15)',
+                                color: 'var(--primary-400)',
+                                padding: '0.1rem 0.35rem',
+                                borderRadius: 'var(--radius-sm)',
+                              }}
+                            >
+                              Elective
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '0.65rem',
+                            color: 'var(--text-muted)',
+                            fontFamily: 'monospace',
+                            marginTop: '0.15rem',
+                          }}
+                        >
+                          {sub.code}
                         </div>
                       </div>
                       {/* credits badge */}
@@ -230,7 +438,7 @@ export default function SGPACalculator() {
                       <select
                         className="select-premium"
                         value={gradeVal}
-                        onChange={(e) => updateGrade(sub.name, e.target.value)}
+                        onChange={(e) => updateGrade(sub.code, e.target.value)}
                         style={{ width: 130 }}
                       >
                         <option value="">Select Grade</option>
@@ -273,7 +481,7 @@ export default function SGPACalculator() {
               </div>
               {nonCreditSubjects.map((sub) => (
                 <div
-                  key={sub.name}
+                  key={sub.code}
                   className="glass-card"
                   style={{
                     padding: '0.9rem 1.1rem',
@@ -287,6 +495,16 @@ export default function SGPACalculator() {
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
                       {sub.name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.65rem',
+                        color: 'var(--text-muted)',
+                        fontFamily: 'monospace',
+                        marginTop: '0.15rem',
+                      }}
+                    >
+                      {sub.code}
                     </div>
                   </div>
                   <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>
@@ -358,6 +576,21 @@ export default function SGPACalculator() {
                   Grade Points
                 </div>
               </div>
+            </div>
+
+            {/* semester total credits info */}
+            <div
+              style={{
+                background: 'var(--bg-secondary)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.6rem 0.75rem',
+                marginBottom: '1rem',
+                fontSize: '0.7rem',
+                color: 'var(--text-muted)',
+                fontWeight: 500,
+              }}
+            >
+              Semester Total: <strong style={{ color: 'var(--text-primary)' }}>{semester.totalCredits} credits</strong>
             </div>
 
             {/* action buttons */}

@@ -5,9 +5,10 @@ import {
   BookOpen,
   BarChart3,
   TrendingUp,
+  GraduationCap,
 } from 'lucide-react';
 import { useAcademic } from '../context/AcademicContext';
-import { SEMESTERS } from '../data/semesters';
+import { SEMESTERS, TOTAL_PROGRAM_CREDITS } from '../data/semesters';
 import { calculateCGPAFromSGPAs } from '../utils/calculations';
 import { getAcademicStanding, cgpaToPercentage } from '../config/gradeSystem';
 import { useAnimatedCounter } from '../hooks/useLocalStorage';
@@ -63,6 +64,19 @@ export default function CGPACalculator() {
   const standing = useMemo(() => getAcademicStanding(cgpa), [cgpa]);
   const percentage = useMemo(() => cgpaToPercentage(cgpa), [cgpa]);
   const animCGPA = useAnimatedCounter(cgpa, 1200, 2);
+
+  /* Credits tracking */
+  const completedCredits = useMemo(
+    () =>
+      validEntries.reduce((sum, entry) => {
+        const sem = SEMESTERS.find((s) => s.id === entry.semesterId);
+        return sum + (sem?.totalCredits ?? 0);
+      }, 0),
+    [validEntries],
+  );
+  const remainingCredits = TOTAL_PROGRAM_CREDITS - completedCredits;
+  const creditProgress = (completedCredits / TOTAL_PROGRAM_CREDITS) * 100;
+  const animCompleted = useAnimatedCounter(completedCredits, 1200, 0);
 
   /* SVG gauge */
   const gaugeR = 72;
@@ -146,6 +160,11 @@ export default function CGPACalculator() {
                     }}
                   >
                     {sem.totalCredits} Credits &middot; {sem.subjects.length} Subjects
+                    {sem.electiveGroups && sem.electiveGroups.length > 0 && (
+                      <span style={{ color: 'var(--primary-400)', marginLeft: '0.35rem' }}>
+                        + {sem.electiveGroups.length} elective{sem.electiveGroups.length > 1 ? 's' : ''}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -322,6 +341,135 @@ export default function CGPACalculator() {
             )}
           </div>
 
+          {/* credits progress card */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="glass-card"
+            style={{ padding: '1.25rem', marginBottom: '1rem' }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                marginBottom: '1rem',
+              }}
+            >
+              <GraduationCap size={16} style={{ color: 'var(--primary-400)' }} />
+              <span
+                style={{
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                Credit Progress
+              </span>
+            </div>
+
+            {/* progress bar */}
+            <div
+              style={{
+                height: 8,
+                borderRadius: 999,
+                background: 'var(--border-color)',
+                overflow: 'hidden',
+                marginBottom: '0.75rem',
+              }}
+            >
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(creditProgress, 100)}%` }}
+                transition={{ duration: 1.2, ease: 'easeOut' }}
+                style={{
+                  height: '100%',
+                  borderRadius: 999,
+                  background: 'linear-gradient(90deg, #2563eb, #06b6d4, #10b981)',
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: '0.5rem',
+                textAlign: 'center',
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: '1.2rem',
+                    fontWeight: 800,
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  {animCompleted}
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.65rem',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  Completed
+                </div>
+              </div>
+              <div>
+                <div
+                  style={{
+                    fontSize: '1.2rem',
+                    fontWeight: 800,
+                    color: remainingCredits > 0 ? '#f59e0b' : '#10b981',
+                  }}
+                >
+                  {remainingCredits}
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.65rem',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  Remaining
+                </div>
+              </div>
+              <div>
+                <div
+                  style={{
+                    fontSize: '1.2rem',
+                    fontWeight: 800,
+                    background: 'linear-gradient(135deg, #2563eb, #06b6d4)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                  }}
+                >
+                  {TOTAL_PROGRAM_CREDITS}
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.65rem',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  Total
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
           {/* summary card */}
           {hasAnyInput && (
             <motion.div
@@ -371,15 +519,25 @@ export default function CGPACalculator() {
                     >
                       {sem?.name}
                     </span>
-                    <span
-                      style={{
-                        fontWeight: 700,
-                        fontSize: '0.85rem',
-                        color: 'var(--text-primary)',
-                      }}
-                    >
-                      {entry.sgpa.toFixed(2)}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span
+                        style={{
+                          fontSize: '0.65rem',
+                          color: 'var(--text-muted)',
+                        }}
+                      >
+                        {sem?.totalCredits} cr
+                      </span>
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          color: 'var(--text-primary)',
+                        }}
+                      >
+                        {entry.sgpa.toFixed(2)}
+                      </span>
+                    </div>
                   </div>
                 );
               })}

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Brain, Star, TrendingUp, BarChart2 } from 'lucide-react';
+import { Brain, Star, TrendingUp, BarChart2, Zap } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useAcademic } from '../context/AcademicContext';
 import {
@@ -40,19 +40,29 @@ export default function GradeIntelligence() {
   const sortedGrades = useMemo(() => Object.entries(distribution).sort(([, a], [, b]) => b - a), [distribution]);
   const mostFrequent = sortedGrades.length > 0 ? sortedGrades[0] : null;
 
-  // All subjects across semesters sorted by grade points
+  // All credit subjects across semesters sorted by grade points (includes projects, excludes non-credit)
   const allSubjects = useMemo(() => {
-    const subjects: Array<{ name: string; grade: string; points: number; semester: string; credits: number }> = [];
+    const subjects: Array<{
+      name: string;
+      code: string;
+      grade: string;
+      points: number;
+      semester: string;
+      credits: number;
+      isProject: boolean;
+    }> = [];
     for (const result of results) {
       const semName = getSemesterById(result.semesterId)?.name ?? `Semester ${result.semesterId}`;
       for (const g of result.grades) {
         if (g.isNonCredit) continue;
         subjects.push({
           name: g.subjectName,
+          code: g.code ?? '',
           grade: g.grade,
           points: GRADE_MAP[g.grade] ?? 0,
           semester: semName,
           credits: g.credits,
+          isProject: g.isProject ?? false,
         });
       }
     }
@@ -84,6 +94,9 @@ export default function GradeIntelligence() {
     });
   }, [results]);
 
+  // Count project subjects
+  const projectSubjects = useMemo(() => allSubjects.filter((s) => s.isProject), [allSubjects]);
+
   if (results.length === 0) {
     return (
       <div className="page-container">
@@ -108,14 +121,14 @@ export default function GradeIntelligence() {
     {
       label: 'Best Subject',
       value: bestSubject ? bestSubject.name : '—',
-      sub: bestSubject ? `${bestSubject.grade} · ${bestSubject.semester}` : '',
+      sub: bestSubject ? `${bestSubject.code ? bestSubject.code + ' · ' : ''}${bestSubject.grade} · ${bestSubject.semester}` : '',
       icon: <TrendingUp size={20} />,
       color: '#10B981',
     },
     {
-      label: 'Most Challenging Subject',
+      label: 'Most Challenging',
       value: worstSubject ? worstSubject.name : '—',
-      sub: worstSubject ? `${worstSubject.grade} · ${worstSubject.semester}` : '',
+      sub: worstSubject ? `${worstSubject.code ? worstSubject.code + ' · ' : ''}${worstSubject.grade} · ${worstSubject.semester}` : '',
       icon: <BarChart2 size={20} />,
       color: '#F59E0B',
     },
@@ -131,6 +144,13 @@ export default function GradeIntelligence() {
       icon: <Brain size={20} />,
       color: '#8B5CF6',
     },
+    {
+      label: 'Total Subjects Analyzed',
+      value: `${allSubjects.length}`,
+      sub: projectSubjects.length > 0 ? `incl. ${projectSubjects.length} project${projectSubjects.length > 1 ? 's' : ''}` : undefined,
+      icon: <Zap size={20} />,
+      color: '#06B6D4',
+    },
   ];
 
   return (
@@ -140,7 +160,7 @@ export default function GradeIntelligence() {
           <Brain size={28} style={{ color: 'var(--primary-500)' }} />
           Grade Distribution Intelligence
         </h1>
-        <p className="page-subtitle">Deep analysis of your grade patterns and academic strengths</p>
+        <p className="page-subtitle">Deep analysis of your grade patterns across all 8 semesters</p>
       </motion.div>
 
       {/* Statistics Cards */}
@@ -209,12 +229,12 @@ export default function GradeIntelligence() {
         {/* Subject-wise Performance */}
         <motion.div
           className="glass-card"
-          style={{ padding: '1.25rem', maxHeight: 480, overflowY: 'auto' }}
+          style={{ padding: '1.25rem', maxHeight: 520, overflowY: 'auto' }}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
         >
-          <h3 style={{ fontSize: '1.0625rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem', position: 'sticky', top: 0, background: 'var(--bg-card)', paddingBottom: '0.5rem' }}>
+          <h3 style={{ fontSize: '1.0625rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem', position: 'sticky', top: 0, background: 'var(--bg-card)', paddingBottom: '0.5rem', zIndex: 1 }}>
             📋 Subject-wise Performance
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -222,7 +242,7 @@ export default function GradeIntelligence() {
               const gradeInfo = GRADE_OPTIONS.find((g) => g.grade === sub.grade);
               return (
                 <div
-                  key={`${sub.name}-${i}`}
+                  key={`${sub.code || sub.name}-${i}`}
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -233,11 +253,19 @@ export default function GradeIntelligence() {
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {sub.name}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                      {sub.isProject && (
+                        <span style={{ fontSize: '0.875rem' }} title="Project">🔬</span>
+                      )}
+                      <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {sub.name}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
-                      {sub.semester} · {sub.credits} credits
+                    <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      {sub.code && (
+                        <span style={{ fontFamily: 'monospace' }}>{sub.code}</span>
+                      )}
+                      <span>{sub.semester} · {sub.credits} credits</span>
                     </div>
                   </div>
                   <span
@@ -261,12 +289,12 @@ export default function GradeIntelligence() {
         {/* Per-semester Grade Breakdown */}
         <motion.div
           className="glass-card"
-          style={{ padding: '1.25rem', maxHeight: 480, overflowY: 'auto' }}
+          style={{ padding: '1.25rem', maxHeight: 520, overflowY: 'auto' }}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
-          <h3 style={{ fontSize: '1.0625rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem', position: 'sticky', top: 0, background: 'var(--bg-card)', paddingBottom: '0.5rem' }}>
+          <h3 style={{ fontSize: '1.0625rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem', position: 'sticky', top: 0, background: 'var(--bg-card)', paddingBottom: '0.5rem', zIndex: 1 }}>
             📅 Per-Semester Grade Breakdown
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>

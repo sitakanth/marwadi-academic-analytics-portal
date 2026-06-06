@@ -1,7 +1,17 @@
 export interface Subject {
+  code: string;
   name: string;
   credits: number;
   isNonCredit: boolean;
+  isProject?: boolean;
+  electiveGroupId?: string;
+}
+
+export interface ElectiveGroup {
+  id: string;
+  title: string;
+  maxSelection: 1;
+  options: Subject[];
 }
 
 export interface Semester {
@@ -9,13 +19,17 @@ export interface Semester {
   name: string;
   subjects: Subject[];
   totalCredits: number;
+  electiveGroups?: ElectiveGroup[];
 }
 
 export interface GradeEntry {
   subjectName: string;
+  code?: string;
   grade: string;
   credits: number;
   isNonCredit: boolean;
+  isProject?: boolean;
+  electiveGroupId?: string;
 }
 
 export interface SemesterResult {
@@ -80,9 +94,11 @@ export interface CommandItem {
   keywords: string[];
 }
 
+/** selectedElectives: semesterId → electiveGroupId → selected subject code */
 export interface AppState {
   profile: StudentProfile;
   semesterResults: Record<number, SemesterResult>;
+  selectedElectives: Record<number, Record<string, string>>;
   darkMode: boolean;
   seminarMode: boolean;
   hasSeenLoading: boolean;
@@ -92,6 +108,7 @@ export type AppAction =
   | { type: 'SET_PROFILE'; payload: StudentProfile }
   | { type: 'SET_SEMESTER_RESULT'; payload: SemesterResult }
   | { type: 'CLEAR_SEMESTER_RESULT'; payload: number }
+  | { type: 'SET_ELECTIVE_SELECTION'; payload: { semesterId: number; groupId: string; subjectCode: string } }
   | { type: 'TOGGLE_DARK_MODE' }
   | { type: 'TOGGLE_SEMINAR_MODE' }
   | { type: 'SET_HAS_SEEN_LOADING' }

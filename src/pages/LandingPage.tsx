@@ -521,7 +521,7 @@ export default function LandingPage() {
                   { label: 'CGPA', value: '8.75', color: '#2563eb' },
                   { label: 'Latest SGPA', value: '9.12', color: '#10b981' },
                   { label: 'Standing', value: 'Distinction', color: '#d4af37' },
-                  { label: 'Credits', value: '81/108', color: '#06b6d4' },
+                  { label: 'Credits', value: '81/165', color: '#06b6d4' },
                 ].map((kpi) => (
                   <div
                     key={kpi.label}

@@ -7,7 +7,7 @@ const STORAGE_KEY = 'mu-academic-portal-state';
 const defaultProfile: StudentProfile = {
   name: '',
   enrollmentNumber: '',
-  department: 'Computer Application',
+  department: 'Computer Science and Engineering in AI/ML/DS',
   batch: '2024-2028',
   avatarColor: '#3B82F6',
 };
@@ -15,6 +15,7 @@ const defaultProfile: StudentProfile = {
 const initialState: AppState = {
   profile: defaultProfile,
   semesterResults: {},
+  selectedElectives: {},
   darkMode: false,
   seminarMode: false,
   hasSeenLoading: false,
@@ -38,6 +39,20 @@ function appReducer(state: AppState, action: AppAction): AppState {
       const newResults = { ...(state.semesterResults || {}) };
       delete newResults[action.payload];
       return { ...state, semesterResults: newResults };
+    }
+
+    case 'SET_ELECTIVE_SELECTION': {
+      const { semesterId, groupId, subjectCode } = action.payload;
+      return {
+        ...state,
+        selectedElectives: {
+          ...(state.selectedElectives || {}),
+          [semesterId]: {
+            ...((state.selectedElectives || {})[semesterId] || {}),
+            [groupId]: subjectCode,
+          },
+        },
+      };
     }
 
     case 'TOGGLE_DARK_MODE':
@@ -65,6 +80,7 @@ interface AcademicContextType {
   dispatch: React.Dispatch<AppAction>;
   getSemesterResults: () => SemesterResult[];
   getResultForSemester: (semesterId: number) => SemesterResult | undefined;
+  getSelectedElectives: (semesterId: number) => Record<string, string>;
 }
 
 const AcademicContext = createContext<AcademicContextType | undefined>(undefined);
@@ -84,6 +100,7 @@ function loadFromStorage(): Partial<AppState> | null {
         ...(parsed.profile || {}),
       },
       semesterResults: parsed.semesterResults || {},
+      selectedElectives: parsed.selectedElectives || {},
       darkMode: Boolean(parsed.darkMode),
       seminarMode: false,
       hasSeenLoading: false,
@@ -112,6 +129,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
       const toStore: Partial<AppState> = {
         profile: state.profile || defaultProfile,
         semesterResults: state.semesterResults || {},
+        selectedElectives: state.selectedElectives || {},
         darkMode: Boolean(state.darkMode),
       };
 
@@ -119,7 +137,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore storage errors
     }
-  }, [state.profile, state.semesterResults, state.darkMode]);
+  }, [state.profile, state.semesterResults, state.selectedElectives, state.darkMode]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', Boolean(state.darkMode));
@@ -135,9 +153,13 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     return (state.semesterResults || {})[semesterId];
   };
 
+  const getSelectedElectives = (semesterId: number): Record<string, string> => {
+    return (state.selectedElectives || {})[semesterId] || {};
+  };
+
   return (
     <AcademicContext.Provider
-      value={{ state, dispatch, getSemesterResults, getResultForSemester }}
+      value={{ state, dispatch, getSemesterResults, getResultForSemester, getSelectedElectives }}
     >
       {children}
     </AcademicContext.Provider>

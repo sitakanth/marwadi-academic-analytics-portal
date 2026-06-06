@@ -8,9 +8,16 @@ import {
   Award,
   TrendingUp,
   Minus,
+  FolderKanban,
+  ListChecks,
 } from 'lucide-react';
 import { useAcademic } from '../context/AcademicContext';
-import { SEMESTERS, getCreditSubjects, getNonCreditSubjects } from '../data/semesters';
+import {
+  SEMESTERS,
+  getActiveSubjects,
+  getActiveCreditSubjects,
+  getNonCreditSubjects,
+} from '../data/semesters';
 import { GRADE_MAP, GRADE_OPTIONS, NON_CREDIT_GRADE } from '../config/gradeSystem';
 import { calculateSGPA, calculateCGPA, calculateCGPAFromSGPAs } from '../utils/calculations';
 import { getAcademicStanding } from '../config/gradeSystem';
@@ -28,40 +35,101 @@ const row = {
 };
 
 export default function Predictor() {
-  const { getSemesterResults } = useAcademic();
+  const { getSemesterResults, getSelectedElectives, dispatch } = useAcademic();
   const results = getSemesterResults();
   const [selectedSem, setSelectedSem] = useState(1);
 
-  const semester = SEMESTERS.find((s) => s.id === selectedSem)!;
-  const creditSubjects = getCreditSubjects(semester);
-  const nonCreditSubjects = getNonCreditSubjects(semester);
+  /* local elective selections for prediction (mirrors context shape) */
+  const [localElectives, setLocalElectives] = useState<Record<number, Record<string, string>>>(() => {
+    const init: Record<number, Record<string, string>> = {};
+    for (const sem of SEMESTERS) {
+      if (sem.electiveGroups) {
+        init[sem.id] = { ...getSelectedElectives(sem.id) };
+      }
+    }
+    return init;
+  });
 
-  /* grade state for the prediction */
+  const semester = SEMESTERS.find((s) => s.id === selectedSem)!;
+  const electivesForSem = localElectives[selectedSem] ?? {};
+
+  const activeSubjects = useMemo(
+    () => getActiveSubjects(semester, electivesForSem),
+    [semester, electivesForSem],
+  );
+  const creditSubjects = useMemo(
+    () => getActiveCreditSubjects(semester, electivesForSem),
+    [semester, electivesForSem],
+  );
+  const nonCreditSubjects = useMemo(() => getNonCreditSubjects(semester), [semester]);
+
+  /* grade state for the prediction — keyed by subject code */
   const [grades, setGrades] = useState<GradeEntry[]>(() =>
-    semester.subjects.map((sub) => ({
+    buildGradeEntries(activeSubjects),
+  );
+
+  function buildGradeEntries(subjects: ReturnType<typeof getActiveSubjects>): GradeEntry[] {
+    return subjects.map((sub) => ({
       subjectName: sub.name,
+      code: sub.code,
       credits: sub.credits,
       isNonCredit: sub.isNonCredit,
+      isProject: sub.isProject,
+      electiveGroupId: sub.electiveGroupId,
       grade: sub.isNonCredit ? NON_CREDIT_GRADE : '',
-    })),
-  );
+    }));
+  }
 
   const handleSemChange = (id: number) => {
     setSelectedSem(id);
     const sem = SEMESTERS.find((s) => s.id === id)!;
-    setGrades(
-      sem.subjects.map((sub) => ({
-        subjectName: sub.name,
-        credits: sub.credits,
-        isNonCredit: sub.isNonCredit,
-        grade: sub.isNonCredit ? NON_CREDIT_GRADE : '',
-      })),
-    );
+    const elecs = localElectives[id] ?? {};
+    const subjects = getActiveSubjects(sem, elecs);
+    setGrades(buildGradeEntries(subjects));
   };
 
-  const updateGrade = (subjectName: string, grade: string) => {
+  /* When elective selection changes, rebuild grades for the affected semester */
+  const handleElectiveChange = (groupId: string, subjectCode: string) => {
+    const updated = {
+      ...localElectives,
+      [selectedSem]: {
+        ...(localElectives[selectedSem] ?? {}),
+        [groupId]: subjectCode,
+      },
+    };
+    setLocalElectives(updated);
+
+    // Also persist to context
+    dispatch({
+      type: 'SET_ELECTIVE_SELECTION',
+      payload: { semesterId: selectedSem, groupId, subjectCode },
+    });
+
+    // Rebuild grade entries with new elective
+    const sem = SEMESTERS.find((s) => s.id === selectedSem)!;
+    const newSubjects = getActiveSubjects(sem, updated[selectedSem] ?? {});
+    setGrades((prev) => {
+      // Keep existing grades for subjects that remain
+      const prevMap = new Map(prev.map((g) => [g.code, g]));
+      return newSubjects.map((sub) => {
+        const existing = prevMap.get(sub.code);
+        if (existing) return existing;
+        return {
+          subjectName: sub.name,
+          code: sub.code,
+          credits: sub.credits,
+          isNonCredit: sub.isNonCredit,
+          isProject: sub.isProject,
+          electiveGroupId: sub.electiveGroupId,
+          grade: sub.isNonCredit ? NON_CREDIT_GRADE : '',
+        };
+      });
+    });
+  };
+
+  const updateGrade = (code: string, grade: string) => {
     setGrades((prev) =>
-      prev.map((g) => (g.subjectName === subjectName ? { ...g, grade } : g)),
+      prev.map((g) => (g.code === code ? { ...g, grade } : g)),
     );
   };
 
@@ -91,9 +159,11 @@ export default function Predictor() {
   const animCurrCGPA = useAnimatedCounter(currentCGPA, 800, 2);
 
   const hasGrades = creditSubjects.some((sub) => {
-    const g = grades.find((gr) => gr.subjectName === sub.name);
+    const g = grades.find((gr) => gr.code === sub.code);
     return g && g.grade && g.grade !== '';
   });
+
+  const hasElectives = !!(semester.electiveGroups && semester.electiveGroups.length > 0);
 
   return (
     <div className="page-container">
@@ -120,6 +190,51 @@ export default function Predictor() {
           );
         })}
       </div>
+
+      {/* ═══ Elective Selector (semesters 5, 6, 7) ═══ */}
+      {hasElectives && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass-card"
+          style={{ padding: '1.25rem', marginBottom: '1.5rem' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+            <ListChecks size={16} style={{ color: 'var(--primary-400)' }} />
+            <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+              Elective Selection
+            </span>
+          </div>
+          {semester.electiveGroups!.map((group) => (
+            <div key={group.id} style={{ marginBottom: '0.75rem' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                  marginBottom: '0.375rem',
+                }}
+              >
+                {group.title}
+              </label>
+              <select
+                className="select-premium"
+                value={electivesForSem[group.id] ?? ''}
+                onChange={(e) => handleElectiveChange(group.id, e.target.value)}
+                style={{ maxWidth: 400 }}
+              >
+                <option value="">— Select Elective —</option>
+                {group.options.map((opt) => (
+                  <option key={opt.code} value={opt.code}>
+                    {opt.name} ({opt.credits} cr)
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </motion.div>
+      )}
 
       {/* ═══ Comparison Cards (top) ═══ */}
       {results.length > 0 && hasGrades && (
@@ -312,20 +427,20 @@ export default function Predictor() {
 
           <AnimatePresence mode="wait">
             <motion.div
-              key={selectedSem}
+              key={`${selectedSem}-${Object.values(electivesForSem).join(',')}`}
               variants={container}
               initial="hidden"
               animate="show"
               exit={{ opacity: 0 }}
             >
               {creditSubjects.map((sub) => {
-                const g = grades.find((gr) => gr.subjectName === sub.name);
+                const g = grades.find((gr) => gr.code === sub.code);
                 const gradeVal = g?.grade ?? '';
                 const points = gradeVal ? sub.credits * (GRADE_MAP[gradeVal] ?? 0) : 0;
                 const gradeInfo = GRADE_OPTIONS.find((o) => o.grade === gradeVal);
                 return (
                   <motion.div
-                    key={sub.name}
+                    key={sub.code}
                     variants={row}
                     className="glass-card"
                     style={{
@@ -338,8 +453,38 @@ export default function Predictor() {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 160 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         {sub.name}
+                        {sub.isProject && (
+                          <span
+                            className="badge"
+                            style={{
+                              fontSize: '0.55rem',
+                              background: 'rgba(139,92,246,0.15)',
+                              color: '#8b5cf6',
+                              padding: '0.15rem 0.4rem',
+                            }}
+                          >
+                            <FolderKanban size={10} style={{ marginRight: '0.2rem' }} />
+                            Project
+                          </span>
+                        )}
+                        {sub.electiveGroupId && (
+                          <span
+                            className="badge"
+                            style={{
+                              fontSize: '0.55rem',
+                              background: 'rgba(6,182,212,0.12)',
+                              color: '#06b6d4',
+                              padding: '0.15rem 0.4rem',
+                            }}
+                          >
+                            Elective
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                        {sub.code}
                       </div>
                     </div>
                     <span className="badge badge-primary" style={{ fontSize: '0.6rem' }}>
@@ -348,7 +493,7 @@ export default function Predictor() {
                     <select
                       className="select-premium"
                       value={gradeVal}
-                      onChange={(e) => updateGrade(sub.name, e.target.value)}
+                      onChange={(e) => updateGrade(sub.code, e.target.value)}
                       style={{ width: 130 }}
                     >
                       <option value="">Select Grade</option>
@@ -386,7 +531,7 @@ export default function Predictor() {
               </div>
               {nonCreditSubjects.map((sub) => (
                 <div
-                  key={sub.name}
+                  key={sub.code}
                   className="glass-card"
                   style={{
                     padding: '0.75rem 1rem',
@@ -397,8 +542,13 @@ export default function Predictor() {
                     opacity: 0.75,
                   }}
                 >
-                  <div style={{ flex: 1, fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
-                    {sub.name}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                      {sub.name}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                      {sub.code}
+                    </div>
                   </div>
                   <span className="badge badge-success" style={{ fontSize: '0.6rem' }}>
                     S (Pass)
@@ -466,6 +616,23 @@ export default function Predictor() {
               }}
             >
               Expected SGPA
+            </div>
+
+            {/* Semester credits info */}
+            <div
+              style={{
+                background: 'var(--bg-secondary)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.75rem',
+                marginBottom: '1rem',
+              }}
+            >
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
+                Semester Credits
+              </div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                {semester.totalCredits}
+              </div>
             </div>
 
             {/* expected CGPA if data exists */}

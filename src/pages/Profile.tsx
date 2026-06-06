@@ -118,7 +118,7 @@ export default function Profile() {
               className="input-premium"
               value={form.department}
               onChange={(e) => handleChange('department', e.target.value)}
-              placeholder="e.g. Computer Application"
+              placeholder="e.g. Computer Science and Engineering in AI/ML/DS"
             />
             {errors.department && <p style={{ fontSize: '0.75rem', color: '#EF4444', marginTop: '0.25rem' }}>{errors.department}</p>}
           </div>
