@@ -24,29 +24,37 @@ function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SET_PROFILE':
       return { ...state, profile: action.payload };
+
     case 'SET_SEMESTER_RESULT':
       return {
         ...state,
         semesterResults: {
-          ...state.semesterResults,
+          ...(state.semesterResults || {}),
           [action.payload.semesterId]: action.payload,
         },
       };
+
     case 'CLEAR_SEMESTER_RESULT': {
-      const newResults = { ...state.semesterResults };
+      const newResults = { ...(state.semesterResults || {}) };
       delete newResults[action.payload];
       return { ...state, semesterResults: newResults };
     }
+
     case 'TOGGLE_DARK_MODE':
       return { ...state, darkMode: !state.darkMode };
+
     case 'TOGGLE_SEMINAR_MODE':
       return { ...state, seminarMode: !state.seminarMode };
+
     case 'SET_HAS_SEEN_LOADING':
       return { ...state, hasSeenLoading: true };
+
     case 'LOAD_STATE':
       return { ...state, ...action.payload };
+
     case 'RESET_ALL':
       return { ...initialState, darkMode: state.darkMode };
+
     default:
       return state;
   }
@@ -63,12 +71,31 @@ const AcademicContext = createContext<AcademicContextType | undefined>(undefined
 
 function loadFromStorage(): Partial<AppState> | null {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
+    if (typeof window === 'undefined') return null;
+
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) return null;
+
+    const parsed = JSON.parse(stored);
+
+    return {
+      profile: {
+        ...defaultProfile,
+        ...(parsed.profile || {}),
+      },
+      semesterResults: parsed.semesterResults || {},
+      darkMode: Boolean(parsed.darkMode),
+      seminarMode: false,
+      hasSeenLoading: false,
+    };
   } catch {
-    // ignore parse errors
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    return null;
   }
-  return null;
 }
 
 export function AcademicProvider({ children }: { children: ReactNode }) {
@@ -81,30 +108,37 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    const toStore: Partial<AppState> = {
-      profile: state.profile,
-      semesterResults: state.semesterResults,
-      darkMode: state.darkMode,
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+    try {
+      const toStore: Partial<AppState> = {
+        profile: state.profile || defaultProfile,
+        semesterResults: state.semesterResults || {},
+        darkMode: Boolean(state.darkMode),
+      };
+
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+    } catch {
+      // ignore storage errors
+    }
   }, [state.profile, state.semesterResults, state.darkMode]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', state.darkMode);
+    document.documentElement.classList.toggle('dark', Boolean(state.darkMode));
   }, [state.darkMode]);
 
   const getSemesterResults = (): SemesterResult[] => {
-    return Object.values(state.semesterResults).sort(
+    return Object.values(state.semesterResults || {}).sort(
       (a, b) => a.semesterId - b.semesterId
     );
   };
 
   const getResultForSemester = (semesterId: number): SemesterResult | undefined => {
-    return state.semesterResults[semesterId];
+    return (state.semesterResults || {})[semesterId];
   };
 
   return (
-    <AcademicContext.Provider value={{ state, dispatch, getSemesterResults, getResultForSemester }}>
+    <AcademicContext.Provider
+      value={{ state, dispatch, getSemesterResults, getResultForSemester }}
+    >
       {children}
     </AcademicContext.Provider>
   );
